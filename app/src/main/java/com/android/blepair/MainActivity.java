@@ -23,6 +23,7 @@ import org.apache.commons.lang.StringUtils;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -31,8 +32,8 @@ import java.util.UUID;
 public class MainActivity extends AppCompatActivity implements AdapterView.OnItemClickListener{
 
     private static final String TAG = "MainActivity";
-
-    static final String SPP_UUID = "00000000-0000-1000-8000-00805F9B34FB";
+    //UUID：00001101-0000-1000-8000-00805F9B34FB  00001124-0000-1000-8000-00805F9B34FB
+    static final String SPP_UUID = "00001101-0000-1000-8000-00805F9B34FB";
 
     private ListView lv;
     private Button btn,disConnectBtn;
@@ -40,15 +41,14 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
     private ArrayAdapter<String> adapter;
 
     private BluetoothAdapter bluetoothAdapter;
-
-    public static BluetoothSocket btSocket;
-
+    BluetoothSocket socket = null;
 
     Handler handler = new Handler(){
         @Override
         public void handleMessage(Message msg) {
             super.handleMessage(msg);
             bluetoothAdapter.cancelDiscovery();
+            Log.e(TAG,"----停止扫描----");
         }
     };
 
@@ -70,7 +70,12 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         intent.addAction(BluetoothDevice.ACTION_FOUND);// 用BroadcastReceiver来取得搜索结果
         intent.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
         intent.addAction(BluetoothAdapter.ACTION_SCAN_MODE_CHANGED);
+        intent.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);   //搜索结束时广播
         intent.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
+        intent.addAction(BluetoothDevice.ACTION_ACL_CONNECTED);
+        intent.addAction(BluetoothDevice.ACTION_ACL_DISCONNECT_REQUESTED);
+        intent.addAction(BluetoothDevice.ACTION_CLASS_CHANGED);
+        intent.addAction(BluetoothDevice.ACTION_PAIRING_REQUEST);
         registerReceiver(searchDevices, intent);
 
 
@@ -105,7 +110,8 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         disConnectBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                btSocket.getRemoteDevice();
+              //  btSocket.getRemoteDevice();
+                //new ConnectThread().cancel();
             }
         });
     }
@@ -116,12 +122,13 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
             String action = intent.getAction();
             Log.e(TAG,"------action-----"+action);
             Bundle b = intent.getExtras();
-            Object[] lstName = b.keySet().toArray();
-
-            // 显示所有收到的消息及其细节
-            for (int i = 0; i < lstName.length; i++) {
-                String keyName = lstName[i].toString();
-                Log.e(keyName, String.valueOf(b.get(keyName)));
+            if(b != null){
+                Object[] lstName = b.keySet().toArray();
+                // 显示所有收到的消息及其细节
+                for (int i = 0; i < lstName.length; i++) {
+                    String keyName = lstName[i].toString();
+                    Log.e(TAG, String.valueOf(b.get(keyName))+"---"+keyName);
+                }
             }
 
             BluetoothDevice device = null;
@@ -173,7 +180,7 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
         BluetoothDevice bd = bluetoothAdapter.getRemoteDevice(bleAddress);
         if(bd.getBondState() == BluetoothDevice.BOND_NONE){ //未绑定
             bd.createBond();    //绑定
-        }else if(bd.getBondState() == BluetoothDevice.BOND_BONDED){
+        }else if(bd.getBondState() == BluetoothDevice.BOND_BONDED){ //已经绑定
             connectDevice(bd);
 
         }
@@ -182,95 +189,46 @@ public class MainActivity extends AppCompatActivity implements AdapterView.OnIte
 
     private void connectDevice(BluetoothDevice blud) {
         UUID uuid = UUID.fromString(SPP_UUID);
-        // btSocket = blud.createRfcommSocketToServiceRecord(uuid);
-        try {
-            btSocket = (BluetoothSocket) blud.getClass().getMethod("createRfcommSocket", new Class[] {int.class}).invoke(blud,1);
-            Log.e(TAG,"-----开始连接---");
-//            Thread thread = new Thread(new TestHread());
-//            thread.start();
-            new ConnectThread(blud);
-//            runOnUiThread(new Runnable() {
-//                @Override
-//                public void run() {
-//                    try {
-//                        btSocket.connect();
-//                    } catch (IOException e) {
-//                        e.printStackTrace();
-//                        Log.e(TAG,"-----连接失败---");
-//                    }
-//                }
-//            });
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (InvocationTargetException e) {
-            e.printStackTrace();
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        }
 
+        Log.e(TAG,"-----开始连接---");
+        new connectThread(blud).start();
+//        try {
+//            socket = blud.createRfcommSocketToServiceRecord(uuid);
+//            socket.connect();
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
 
     }
 
-    class TestHread implements Runnable{
+    private class connectThread extends Thread{
+         UUID uuids = UUID.fromString(SPP_UUID);
+        private BluetoothDevice device;
+
+        public connectThread(BluetoothDevice device) {
+            this.device = device;
+
+        }
+
 
         @Override
         public void run() {
+            BluetoothSocket tempSocket = null;
+            bluetoothAdapter.cancelDiscovery(); //停止扫描
             try {
-                btSocket.connect();
+                Log.e(TAG,"-------开启连接----");
+                tempSocket = device.createRfcommSocketToServiceRecord(uuids);
+                tempSocket.connect();
             } catch (IOException e) {
                 e.printStackTrace();
-                Log.e(TAG,"-----连接失败---");
-            }
-        }
-    }
-
-    class ConnectThread extends Thread {
-        private final BluetoothSocket mmSocket;
-        private final BluetoothDevice mmDevice;
-        UUID uuid = UUID.fromString(SPP_UUID);
-        public ConnectThread(BluetoothDevice device) {
-            // Use a temporary object that is later assigned to mmSocket,
-            // because mmSocket is final
-            BluetoothSocket tmp = null;
-            mmDevice = device;
-
-            // Get a BluetoothSocket to connect with the given BluetoothDevice
-            try {
-                // MY_UUID is the app's UUID string, also used by the server code
-                tmp = device.createRfcommSocketToServiceRecord(uuid);
-            } catch (IOException e) { }
-            mmSocket = tmp;
-        }
-
-        public void run() {
-            // Cancel discovery because it will slow down the connection
-            bluetoothAdapter.cancelDiscovery();
-
-            try {
-                // Connect the device through the socket. This will block
-                // until it succeeds or throws an exception
-                mmSocket.connect();
-            } catch (IOException connectException) {
-                Log.e(TAG,"-----22---连接失败-----");
-                // Unable to connect; close the socket and get out
+                Log.e(TAG,"-------连接失败----");
                 try {
-                    mmSocket.close();
-                } catch (IOException closeException) {
-                    closeException.getMessage();
-                    Log.e(TAG,"-----11---连接失败-----");
+                    tempSocket.close();
+                } catch (IOException e1) {
+                    e1.printStackTrace();
                 }
-                return;
             }
-
-            // Do work to manage the connection (in a separate thread)
-           // manageConnectedSocket(mmSocket);
-        }
-
-        /** Will cancel an in-progress connection, and close the socket **/
-        public void cancel() {
-            try {
-                mmSocket.close();
-            } catch (IOException e) { }
         }
     }
+
 }
